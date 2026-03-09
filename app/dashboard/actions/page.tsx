@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useSociete } from '@/lib/societe-context';
 import { Action } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 import { Loading, EmptyState } from '@/components/loading';
@@ -11,6 +12,7 @@ import { Plus, User, Calendar } from 'lucide-react';
 type Filter = 'tous' | 'à faire' | 'en cours' | 'fait';
 
 export default function ActionsPage() {
+  const { selectedId } = useSociete();
   const [actions, setActions] = useState<Action[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>('tous');
@@ -23,19 +25,21 @@ export default function ActionsPage() {
     priorite: 'moyenne',
   });
 
-  async function fetchData() {
+  const fetchData = useCallback(async () => {
+    if (!selectedId) return;
     setLoading(true);
     const { data } = await supabase
       .from('actions')
       .select('*')
+      .eq('societe_id', selectedId)
       .order('priorite', { ascending: true });
     if (data) setActions(data);
     setLoading(false);
-  }
+  }, [selectedId]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   async function toggleStatut(action: Action) {
     const nextStatut: Record<string, string> = {
@@ -53,6 +57,7 @@ export default function ActionsPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     await supabase.from('actions').insert({
+      societe_id: selectedId,
       titre: form.titre,
       description: form.description,
       assignee: form.assignee,

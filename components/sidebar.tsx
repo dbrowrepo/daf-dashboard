@@ -2,13 +2,17 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useSociete } from '@/lib/societe-context';
 import {
   LayoutDashboard,
   Wallet,
   TrendingUp,
   FileText,
   ListChecks,
+  ChevronDown,
+  Building2,
 } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
 
 const navItems = [
   { href: '/dashboard', label: 'Accueil', icon: LayoutDashboard },
@@ -20,6 +24,21 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { societes, selectedId, setSelectedId, loading } = useSociete();
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const selectedSociete = societes.find((s) => s.id === selectedId);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
     <aside className="fixed left-0 top-0 h-screen w-64 bg-card border-r border-card-border flex flex-col z-50">
@@ -32,6 +51,47 @@ export function Sidebar() {
             <h1 className="font-semibold text-text-primary text-lg">DAF Externe</h1>
             <p className="text-xs text-text-secondary">Tableau de bord</p>
           </div>
+        </div>
+      </div>
+
+      {/* Sélecteur de société */}
+      <div className="px-4 pt-4" ref={dropdownRef}>
+        <div className="relative">
+          <button
+            onClick={() => setDropdownOpen(!dropdownOpen)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 bg-background border border-card-border rounded-lg text-sm hover:border-accent/50 transition-colors"
+          >
+            <Building2 size={16} className="text-accent shrink-0" />
+            <span className="text-text-primary truncate flex-1 text-left">
+              {loading ? 'Chargement…' : selectedSociete?.nom || 'Sélectionner'}
+            </span>
+            <ChevronDown
+              size={14}
+              className={`text-text-secondary shrink-0 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`}
+            />
+          </button>
+
+          {dropdownOpen && societes.length > 0 && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-card-border rounded-lg shadow-xl overflow-hidden z-10">
+              {societes.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => {
+                    setSelectedId(s.id);
+                    setDropdownOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-2.5 text-sm transition-colors flex items-center gap-2 ${
+                    s.id === selectedId
+                      ? 'bg-accent/10 text-accent'
+                      : 'text-text-secondary hover:text-text-primary hover:bg-white/5'
+                  }`}
+                >
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${s.id === selectedId ? 'bg-accent' : 'bg-transparent'}`} />
+                  {s.nom}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useSociete } from '@/lib/societe-context';
 import { PlCustomerInvoice, PlSupplierInvoice } from '@/lib/types';
 import { formatEur, formatDate } from '@/lib/utils';
 import { Loading, EmptyState } from '@/components/loading';
@@ -9,22 +10,26 @@ import { Loading, EmptyState } from '@/components/loading';
 type Tab = 'clients' | 'fournisseurs';
 
 export default function FacturesPage() {
+  const { selectedId } = useSociete();
   const [tab, setTab] = useState<Tab>('clients');
   const [customerInvoices, setCustomerInvoices] = useState<PlCustomerInvoice[]>([]);
   const [supplierInvoices, setSupplierInvoices] = useState<PlSupplierInvoice[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!selectedId) return;
     async function fetchData() {
       setLoading(true);
       const [customersRes, suppliersRes] = await Promise.all([
         supabase
           .from('pl_customer_invoices')
           .select('*')
+          .eq('societe_id', selectedId)
           .order('deadline', { ascending: true }),
         supabase
           .from('pl_supplier_invoices')
           .select('*')
+          .eq('societe_id', selectedId)
           .order('deadline', { ascending: true }),
       ]);
 
@@ -34,7 +39,7 @@ export default function FacturesPage() {
     }
 
     fetchData();
-  }, []);
+  }, [selectedId]);
 
   if (loading) return <Loading />;
 

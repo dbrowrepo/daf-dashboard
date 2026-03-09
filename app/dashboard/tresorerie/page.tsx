@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useSociete } from '@/lib/societe-context';
 import { Tresorerie13Semaines } from '@/lib/types';
 import { formatEur, formatDate } from '@/lib/utils';
 import { Loading, EmptyState } from '@/components/loading';
@@ -18,6 +19,7 @@ import {
 } from 'recharts';
 
 export default function TresoreriePage() {
+  const { selectedId } = useSociete();
   const [data, setData] = useState<Tresorerie13Semaines[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -29,23 +31,26 @@ export default function TresoreriePage() {
     solde_prev: '',
   });
 
-  async function fetchData() {
+  const fetchData = useCallback(async () => {
+    if (!selectedId) return;
     setLoading(true);
     const { data } = await supabase
       .from('tresorerie_13_semaines')
       .select('*')
+      .eq('societe_id', selectedId)
       .order('semaine_debut', { ascending: true });
     if (data) setData(data);
     setLoading(false);
-  }
+  }, [selectedId]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     await supabase.from('tresorerie_13_semaines').insert({
+      societe_id: selectedId,
       semaine_debut: form.semaine_debut,
       semaine_fin: form.semaine_fin,
       encaissements_prevus: parseFloat(form.encaissements_prevus),

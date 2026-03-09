@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useSociete } from '@/lib/societe-context';
 import { KpiSnapshot } from '@/lib/types';
 import { formatEur } from '@/lib/utils';
 import { Loading, EmptyState } from '@/components/loading';
@@ -9,6 +10,7 @@ import { Modal } from '@/components/modal';
 import { TrendingUp, TrendingDown, ArrowRight, Plus } from 'lucide-react';
 
 export default function PerformancePage() {
+  const { selectedId } = useSociete();
   const [snapshots, setSnapshots] = useState<KpiSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -22,24 +24,27 @@ export default function PerformancePage() {
     commentaire: '',
   });
 
-  async function fetchData() {
+  const fetchData = useCallback(async () => {
+    if (!selectedId) return;
     setLoading(true);
     const { data } = await supabase
       .from('kpi_snapshots')
       .select('*')
+      .eq('societe_id', selectedId)
       .order('date_snapshot', { ascending: false })
       .limit(2);
     if (data) setSnapshots(data);
     setLoading(false);
-  }
+  }, [selectedId]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     await supabase.from('kpi_snapshots').insert({
+      societe_id: selectedId,
       date_snapshot: new Date().toISOString().split('T')[0],
       tresorerie: parseFloat(form.tresorerie),
       burn_mensuel: parseFloat(form.burn_mensuel),

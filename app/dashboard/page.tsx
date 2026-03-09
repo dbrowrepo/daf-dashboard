@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useSociete } from '@/lib/societe-context';
 import { KpiSnapshot, Alerte, Action } from '@/lib/types';
 import { formatEur } from '@/lib/utils';
 import { KpiCard } from '@/components/kpi-card';
@@ -10,40 +11,47 @@ import { Loading, EmptyState } from '@/components/loading';
 import { Wallet, Clock, TrendingUp, BarChart3 } from 'lucide-react';
 
 export default function DashboardPage() {
+  const { selectedId } = useSociete();
   const [snapshot, setSnapshot] = useState<KpiSnapshot | null>(null);
   const [alertes, setAlertes] = useState<Alerte[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!selectedId) return;
+
     async function fetchData() {
       setLoading(true);
       const [snapshotRes, alertesRes, actionsRes] = await Promise.all([
         supabase
           .from('kpi_snapshots')
           .select('*')
+          .eq('societe_id', selectedId)
           .order('date_snapshot', { ascending: false })
           .limit(1)
           .single(),
         supabase
           .from('alertes')
           .select('*')
+          .eq('societe_id', selectedId)
           .order('created_at', { ascending: false }),
         supabase
           .from('actions')
           .select('*')
+          .eq('societe_id', selectedId)
           .neq('statut', 'fait')
           .order('priorite', { ascending: true }),
       ]);
 
       if (snapshotRes.data) setSnapshot(snapshotRes.data);
+      else setSnapshot(null);
       if (alertesRes.data) setAlertes(alertesRes.data);
       if (actionsRes.data) setActions(actionsRes.data);
       setLoading(false);
     }
 
     fetchData();
-  }, []);
+  }, [selectedId]);
 
   if (loading) return <Loading />;
 
