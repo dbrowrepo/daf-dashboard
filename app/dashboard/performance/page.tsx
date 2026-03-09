@@ -7,11 +7,23 @@ import { KpiSnapshot } from '@/lib/types';
 import { formatEur } from '@/lib/utils';
 import { Loading, EmptyState } from '@/components/loading';
 import { Modal } from '@/components/modal';
-import { TrendingUp, TrendingDown, ArrowRight, Plus } from 'lucide-react';
+import { TrendingUp, TrendingDown, Plus } from 'lucide-react';
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from 'recharts';
 
 export default function PerformancePage() {
   const { selectedId } = useSociete();
-  const [snapshots, setSnapshots] = useState<KpiSnapshot[]>([]);
+  const [allSnapshots, setAllSnapshots] = useState<KpiSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState({
@@ -31,9 +43,8 @@ export default function PerformancePage() {
       .from('kpi_snapshots')
       .select('*')
       .eq('societe_id', selectedId)
-      .order('date_snapshot', { ascending: false })
-      .limit(2);
-    if (data) setSnapshots(data);
+      .order('date_snapshot', { ascending: true });
+    if (data) setAllSnapshots(data);
     setLoading(false);
   }, [selectedId]);
 
@@ -67,13 +78,24 @@ export default function PerformancePage() {
     fetchData();
   }
 
-  const current = snapshots[0] || null;
-  const previous = snapshots[1] || null;
+  const current = allSnapshots.length > 0 ? allSnapshots[allSnapshots.length - 1] : null;
+  const previous = allSnapshots.length > 1 ? allSnapshots[allSnapshots.length - 2] : null;
 
   function variation(currentVal: number, previousVal: number | undefined) {
-    if (!previousVal || previousVal === 0) return null;
+    if (previousVal === undefined || previousVal === 0) return null;
     return ((currentVal - previousVal) / Math.abs(previousVal)) * 100;
   }
+
+  // Chart data : tous les snapshots en ordre chronologique
+  const chartData = allSnapshots.map((s) => ({
+    date: new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: 'short' }).format(
+      new Date(s.date_snapshot)
+    ),
+    ca: s.ca_mtd,
+    charges: s.charges_mtd,
+    resultat: s.resultat_mtd,
+    tresorerie: s.tresorerie,
+  }));
 
   if (loading) return <Loading />;
 
@@ -125,7 +147,7 @@ export default function PerformancePage() {
           title="CA du mois"
           value={formatEur(current.ca_mtd)}
           variation={caVar}
-          positive={true}
+          positive={current.ca_mtd >= 0}
         />
         <PerformanceCard
           title="Charges du mois"
@@ -140,6 +162,119 @@ export default function PerformancePage() {
           positive={current.resultat_mtd >= 0}
         />
       </div>
+
+      {/* Graphique évolution CA / Charges / Résultat */}
+      {chartData.length > 1 && (
+        <div className="bg-card border border-card-border rounded-xl p-6">
+          <h3 className="text-lg font-semibold text-text-primary mb-4">
+            Évolution mensuelle
+          </h3>
+          <div className="h-80">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} barGap={2}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#2d3548" />
+                <XAxis
+                  dataKey="date"
+                  stroke="#64748b"
+                  fontSize={12}
+                  tickLine={false}
+                />
+                <YAxis
+                  stroke="#64748b"
+                  fontSize={12}
+                  tickLine={false}
+                  tickFormatter={(v) =>
+                    new Intl.NumberFormat('fr-FR', {
+                      notation: 'compact',
+                      compactDisplay: 'short',
+                    }).format(v)
+                  }
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#1e2330',
+                    border: '1px solid #2d3548',
+                    borderRadius: '8px',
+                    color: '#e2e8f0',
+                  }}
+                  formatter={(value: number) => formatEur(value)}
+                />
+                <Legend
+                  wrapperStyle={{ color: '#64748b', fontSize: '12px' }}
+                />
+                <Bar
+                  dataKey="ca"
+                  name="CA"
+                  fill="#10b981"
+                  radius={[4, 4, 0, 0]}
+                />
+                <Bar
+                  dataKey="charges"
+                  name="Charges"
+                  fill="#f97316"
+                  radius={[4, 4, 0, 0]}
+                />
+                <Bar
+                  dataKey="resultat"
+                  name="Résultat"
+                  fill="#6366f1"
+                  radius={[4, 4, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Graphique évolution trésorerie */}
+      {chartData.length > 1 && (
+        <div className="bg-card border border-card-border rounded-xl p-6">
+          <h3 className="text-lg font-semibold text-text-primary mb-4">
+            Évolution de la trésorerie
+          </h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#2d3548" />
+                <XAxis
+                  dataKey="date"
+                  stroke="#64748b"
+                  fontSize={12}
+                  tickLine={false}
+                />
+                <YAxis
+                  stroke="#64748b"
+                  fontSize={12}
+                  tickLine={false}
+                  tickFormatter={(v) =>
+                    new Intl.NumberFormat('fr-FR', {
+                      notation: 'compact',
+                      compactDisplay: 'short',
+                    }).format(v)
+                  }
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#1e2330',
+                    border: '1px solid #2d3548',
+                    borderRadius: '8px',
+                    color: '#e2e8f0',
+                  }}
+                  formatter={(value: number) => formatEur(value)}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="tresorerie"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  dot={{ fill: '#10b981', r: 4 }}
+                  name="Trésorerie"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {/* Commentaire */}
       <div className="bg-card border border-card-border rounded-xl p-6">
@@ -255,7 +390,7 @@ function SnapshotModal({
           <textarea
             rows={3}
             value={form.commentaire}
-            onChange={(e) => setForm({ ...form, commentaire: e.target.value })}
+            onChange={(e) => setForm((prev) => ({ ...prev, commentaire: e.target.value }))}
             className="w-full px-3 py-2 bg-background border border-card-border rounded-lg text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-accent resize-none"
           />
         </div>
