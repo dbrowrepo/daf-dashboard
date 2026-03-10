@@ -78,24 +78,47 @@ export default function PerformancePage() {
     fetchData();
   }
 
-  const current = allSnapshots.length > 0 ? allSnapshots[allSnapshots.length - 1] : null;
-  const previous = allSnapshots.length > 1 ? allSnapshots[allSnapshots.length - 2] : null;
+  // Déduplique les snapshots : garde le plus récent par mois_ref (extrait du commentaire)
+  const deduped = (() => {
+    const byMonth = new Map<string, KpiSnapshot>();
+    allSnapshots.forEach((s) => {
+      // Extraire le mois de référence du commentaire (format: "Sync auto — 2026-02 — ...")
+      const match = s.commentaire?.match(/(\d{4}-\d{2})/);
+      const key = match ? match[1] : s.date_snapshot.slice(0, 7);
+      // Garde le plus récent par mois
+      const existing = byMonth.get(key);
+      if (!existing || new Date(s.date_snapshot) > new Date(existing.date_snapshot)) {
+        byMonth.set(key, s);
+      }
+    });
+    // Trie par clé de mois
+    return Array.from(byMonth.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, v]) => v);
+  })();
+
+  const current = deduped.length > 0 ? deduped[deduped.length - 1] : null;
+  const previous = deduped.length > 1 ? deduped[deduped.length - 2] : null;
 
   function variation(currentVal: number, previousVal: number | undefined) {
     if (previousVal === undefined || previousVal === 0) return null;
     return ((currentVal - previousVal) / Math.abs(previousVal)) * 100;
   }
 
-  // Chart data : tous les snapshots en ordre chronologique
-  const chartData = allSnapshots.map((s) => ({
-    date: new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: 'short' }).format(
-      new Date(s.date_snapshot)
-    ),
-    ca: s.ca_mtd,
-    charges: s.charges_mtd,
-    resultat: s.resultat_mtd,
-    tresorerie: s.tresorerie,
-  }));
+  // Chart data : un point par mois, dédupliqué
+  const chartData = deduped.map((s) => {
+    const match = s.commentaire?.match(/(\d{4}-\d{2})/);
+    const monthKey = match ? match[1] : s.date_snapshot.slice(0, 7);
+    const [year, month] = monthKey.split('-');
+    const monthNames = ['', 'Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
+    return {
+      date: `${monthNames[parseInt(month)]} ${year}`,
+      ca: s.ca_mtd,
+      charges: s.charges_mtd,
+      resultat: s.resultat_mtd,
+      tresorerie: s.tresorerie,
+    };
+  });
 
   if (loading) return <Loading />;
 
