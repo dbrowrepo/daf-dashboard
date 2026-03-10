@@ -53,7 +53,7 @@ export interface PlCustomerInvoice {
   deadline: string;
   customer_name: string;
   amount_incl_tax: number;
-  status: 'paid' | 'posted' | 'draft';
+  status: string;
 }
 
 export interface PlSupplierInvoice {
@@ -64,7 +64,7 @@ export interface PlSupplierInvoice {
   deadline: string;
   supplier_name: string;
   amount_incl_tax: number;
-  status: 'paid' | 'posted' | 'draft';
+  status: string | null;
 }
 
 export interface PlBankTransaction {
