@@ -13,6 +13,7 @@ import { Wallet, Clock, TrendingUp, BarChart3 } from 'lucide-react';
 export default function DashboardPage() {
   const { selectedId } = useSociete();
   const [snapshot, setSnapshot] = useState<KpiSnapshot | null>(null);
+  const [prevSnapshot, setPrevSnapshot] = useState<KpiSnapshot | null>(null);
   const [alertes, setAlertes] = useState<Alerte[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,9 +28,7 @@ export default function DashboardPage() {
           .from('kpi_snapshots')
           .select('*')
           .eq('societe_id', selectedId)
-          .order('date_snapshot', { ascending: false })
-          .limit(1)
-          .single(),
+          .order('date_snapshot', { ascending: false }),
         supabase
           .from('alertes')
           .select('*')
@@ -43,8 +42,36 @@ export default function DashboardPage() {
           .order('priorite', { ascending: true }),
       ]);
 
-      if (snapshotRes.data) setSnapshot(snapshotRes.data);
-      else setSnapshot(null);
+      // Déduplique par mois_ref (extrait du commentaire), garde le plus récent par mois
+      if (snapshotRes.data && snapshotRes.data.length > 0) {
+        const byMonth = new Map<string, KpiSnapshot>();
+        snapshotRes.data.forEach((s) => {
+          const match = s.commentaire?.match(/(\d{4}-\d{2})/);
+          if (!match) return; // ignore les snapshots sans mois de référence clair
+          const key = match[1];
+          const existing = byMonth.get(key);
+          if (
+            !existing ||
+            new Date(s.date_snapshot) > new Date(existing.date_snapshot)
+          ) {
+            byMonth.set(key, s);
+          }
+        });
+        const sorted = Array.from(byMonth.entries())
+          .sort(([a], [b]) => b.localeCompare(a))
+          .map(([, v]) => v);
+        if (sorted.length > 0) {
+          setSnapshot(sorted[0]);
+          setPrevSnapshot(sorted[1] || null);
+        } else {
+          // Fallback: prendre le plus récent par date_snapshot
+          setSnapshot(snapshotRes.data[0]);
+          setPrevSnapshot(null);
+        }
+      } else {
+        setSnapshot(null);
+        setPrevSnapshot(null);
+      }
       if (alertesRes.data) setAlertes(alertesRes.data);
       if (actionsRes.data) setActions(actionsRes.data);
       setLoading(false);
@@ -52,6 +79,11 @@ export default function DashboardPage() {
 
     fetchData();
   }, [selectedId]);
+
+  function variation(curr: number, prev: number | undefined) {
+    if (prev === undefined || prev === 0) return null;
+    return ((curr - prev) / Math.abs(prev)) * 100;
+  }
 
   if (loading) return <Loading />;
 
@@ -75,6 +107,11 @@ export default function DashboardPage() {
           title="CA du mois"
           value={snapshot ? formatEur(snapshot.ca_mtd) : '—'}
           icon={TrendingUp}
+          variation={
+            snapshot && prevSnapshot
+              ? variation(snapshot.ca_mtd, prevSnapshot.ca_mtd)
+              : null
+          }
         />
         <KpiCard
           title="Résultat MTD"
@@ -86,6 +123,11 @@ export default function DashboardPage() {
                 ? 'positive'
                 : 'negative'
               : 'default'
+          }
+          variation={
+            snapshot && prevSnapshot
+              ? variation(snapshot.resultat_mtd, prevSnapshot.resultat_mtd)
+              : null
           }
         />
       </div>

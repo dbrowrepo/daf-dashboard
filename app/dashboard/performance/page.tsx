@@ -299,6 +299,98 @@ export default function PerformancePage() {
         </div>
       )}
 
+      {/* Tableau comparatif 3 derniers mois */}
+      {deduped.length >= 2 && (
+        <div className="bg-card border border-card-border rounded-xl overflow-hidden">
+          <div className="p-6 pb-4">
+            <h3 className="text-lg font-semibold text-text-primary">
+              Comparatif des derniers mois
+            </h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-card-border">
+                  <th className="text-left text-xs font-medium text-text-secondary px-6 py-3">
+                    Mois
+                  </th>
+                  <th className="text-right text-xs font-medium text-text-secondary px-6 py-3">
+                    CA
+                  </th>
+                  <th className="text-right text-xs font-medium text-text-secondary px-6 py-3">
+                    Charges
+                  </th>
+                  <th className="text-right text-xs font-medium text-text-secondary px-6 py-3">
+                    Résultat
+                  </th>
+                  <th className="text-right text-xs font-medium text-text-secondary px-6 py-3">
+                    Trésorerie
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {deduped
+                  .slice(-3)
+                  .reverse()
+                  .map((s, i) => {
+                    const match = s.commentaire?.match(/(\d{4}-\d{2})/);
+                    const monthKey = match
+                      ? match[1]
+                      : s.date_snapshot.slice(0, 7);
+                    const [year, month] = monthKey.split('-');
+                    const monthNames = [
+                      '',
+                      'Janvier',
+                      'Février',
+                      'Mars',
+                      'Avril',
+                      'Mai',
+                      'Juin',
+                      'Juillet',
+                      'Août',
+                      'Septembre',
+                      'Octobre',
+                      'Novembre',
+                      'Décembre',
+                    ];
+                    const label = `${monthNames[parseInt(month)]} ${year}`;
+                    return (
+                      <tr
+                        key={i}
+                        className={`border-b border-card-border/50 hover:bg-white/[0.02] ${i === 0 ? 'bg-white/[0.02]' : ''}`}
+                      >
+                        <td className="px-6 py-4 text-sm text-text-primary font-medium">
+                          {label}
+                          {i === 0 && (
+                            <span className="ml-2 text-[10px] text-accent font-normal">
+                              actuel
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-emerald-400 text-right font-medium">
+                          {formatEur(s.ca_mtd)}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-orange-400 text-right font-medium">
+                          {formatEur(s.charges_mtd)}
+                        </td>
+                        <td
+                          className={`px-6 py-4 text-sm text-right font-bold ${s.resultat_mtd >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
+                        >
+                          {s.resultat_mtd >= 0 ? '+' : ''}
+                          {formatEur(s.resultat_mtd)}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-text-primary text-right">
+                          {formatEur(s.tresorerie)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Commentaire */}
       <div className="bg-card border border-card-border rounded-xl p-6">
         <h3 className="text-lg font-semibold text-text-primary mb-3">
