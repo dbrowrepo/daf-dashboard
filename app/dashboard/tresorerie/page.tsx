@@ -10,6 +10,11 @@ import {
   TrendingDown,
   Wallet,
   Landmark,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  AlertTriangle,
+  Clock,
+  Scale,
 } from 'lucide-react';
 import {
   Bar,
@@ -55,6 +60,22 @@ interface EvoWeek {
   solde: number;
 }
 
+interface InvoiceRow {
+  customer_name?: string;
+  supplier_name?: string;
+  amount_incl_tax: number;
+  deadline: string;
+  status: string | null;
+}
+
+interface AttendusData {
+  overdueTotal: number;
+  upcomingTotal: number;
+  overdueCount: number;
+  upcomingCount: number;
+  top5: InvoiceRow[];
+}
+
 /* ── Helpers ── */
 
 function getMonday(d: Date): Date {
@@ -88,30 +109,95 @@ export default function TresoreriePage() {
   const [tresorerieActuelle, setTresorerieActuelle] = useState<number | null>(
     null
   );
+  const [encAttendus, setEncAttendus] = useState<AttendusData | null>(null);
+  const [decAttendus, setDecAttendus] = useState<AttendusData | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     if (!selectedId) return;
     setLoading(true);
 
-    // Fetch ALL transactions (paginated) + current treasury
-    const dateFrom = new Date();
-    dateFrom.setDate(dateFrom.getDate() - 100);
-    const dateFromStr = dateFrom.toISOString().split('T')[0];
+    const todayStr = new Date().toISOString().split('T')[0];
+    const j30Str = new Date(Date.now() + 30 * 86400000)
+      .toISOString()
+      .split('T')[0];
 
-    const [kpiRes] = await Promise.all([
+    // Parallel fetch: KPI + customer invoices + supplier invoices
+    const [kpiRes, custRes, suppRes] = await Promise.all([
       supabase
         .from('kpi_snapshots')
         .select('tresorerie')
         .eq('societe_id', selectedId)
         .order('date_snapshot', { ascending: false })
         .limit(1),
+      supabase
+        .from('pl_customer_invoices')
+        .select('customer_name, amount_incl_tax, deadline, status')
+        .eq('societe_id', selectedId)
+        .not('status', 'in', '("paid","cancelled")'),
+      supabase
+        .from('pl_supplier_invoices')
+        .select('supplier_name, amount_incl_tax, deadline, status')
+        .eq('societe_id', selectedId)
+        .neq('status', 'paid'),
     ]);
 
     if (kpiRes.data && kpiRes.data.length > 0) {
       setTresorerieActuelle(kpiRes.data[0].tresorerie);
     } else {
       setTresorerieActuelle(null);
+    }
+
+    // Process customer invoices (encaissements attendus)
+    if (custRes.data) {
+      const overdue = custRes.data.filter(
+        (f) => f.deadline && f.deadline < todayStr
+      );
+      const upcoming = custRes.data.filter(
+        (f) => f.deadline && f.deadline >= todayStr && f.deadline <= j30Str
+      );
+      const allUnpaid = [...overdue, ...upcoming].sort(
+        (a, b) => (b.amount_incl_tax || 0) - (a.amount_incl_tax || 0)
+      );
+      setEncAttendus({
+        overdueTotal: overdue.reduce(
+          (s, f) => s + (f.amount_incl_tax || 0),
+          0
+        ),
+        upcomingTotal: upcoming.reduce(
+          (s, f) => s + (f.amount_incl_tax || 0),
+          0
+        ),
+        overdueCount: overdue.length,
+        upcomingCount: upcoming.length,
+        top5: allUnpaid.slice(0, 5),
+      });
+    }
+
+    // Process supplier invoices (décaissements attendus)
+    if (suppRes.data) {
+      const overdue = suppRes.data.filter(
+        (f) => f.deadline && f.deadline < todayStr
+      );
+      const upcoming = suppRes.data.filter(
+        (f) => f.deadline && f.deadline >= todayStr && f.deadline <= j30Str
+      );
+      const allUnpaid = [...overdue, ...upcoming].sort(
+        (a, b) => (b.amount_incl_tax || 0) - (a.amount_incl_tax || 0)
+      );
+      setDecAttendus({
+        overdueTotal: overdue.reduce(
+          (s, f) => s + (f.amount_incl_tax || 0),
+          0
+        ),
+        upcomingTotal: upcoming.reduce(
+          (s, f) => s + (f.amount_incl_tax || 0),
+          0
+        ),
+        overdueCount: overdue.length,
+        upcomingCount: upcoming.length,
+        top5: allUnpaid.slice(0, 5),
+      });
     }
 
     // Paginated fetch of ALL transactions for solde par compte
@@ -278,10 +364,25 @@ export default function TresoreriePage() {
   const totalEnc = weeklyData.reduce((s, w) => s + w.encaissements, 0);
   const totalDec = weeklyData.reduce((s, w) => s + w.decaissements, 0);
 
+  /* ── Solde net attendu J+30 ── */
+  const encTotal =
+    (encAttendus?.overdueTotal ?? 0) + (encAttendus?.upcomingTotal ?? 0);
+  const decTotal =
+    (decAttendus?.overdueTotal ?? 0) + (decAttendus?.upcomingTotal ?? 0);
+  const soldeNetAttendu = encTotal - decTotal;
+
   if (loading) return <Loading />;
 
   /* ── Colors for accounts ── */
   const accountColors = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899'];
+
+  function formatDeadline(d: string): string {
+    return new Date(d).toLocaleDateString('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: '2-digit',
+    });
+  }
 
   return (
     <div className="space-y-6">
@@ -384,6 +485,204 @@ export default function TresoreriePage() {
           <p className="text-xs text-text-secondary text-right">
             Somme des comptes : {formatEur(totalComptes)}
           </p>
+        </div>
+      )}
+
+      {/* ── Encaissements & Décaissements attendus ── */}
+      {(encAttendus || decAttendus) && (
+        <div className="space-y-4">
+          {/* Résumé solde net attendu */}
+          <div className="bg-card border border-card-border rounded-xl p-5">
+            <div className="flex items-center gap-3 mb-1">
+              <Scale size={18} className="text-accent" />
+              <h3 className="text-lg font-semibold text-text-primary">
+                Flux attendus J+30
+              </h3>
+            </div>
+            <div className="flex items-center gap-6 mt-3">
+              <div className="flex items-center gap-2">
+                <ArrowDownCircle size={16} className="text-emerald-400" />
+                <span className="text-sm text-text-secondary">
+                  Encaissements :
+                </span>
+                <span className="text-sm font-bold text-emerald-400">
+                  +{formatEur(encTotal)}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <ArrowUpCircle size={16} className="text-red-400" />
+                <span className="text-sm text-text-secondary">
+                  Décaissements :
+                </span>
+                <span className="text-sm font-bold text-red-400">
+                  -{formatEur(decTotal)}
+                </span>
+              </div>
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-sm text-text-secondary">
+                  Solde net attendu :
+                </span>
+                <span
+                  className={`text-lg font-bold ${soldeNetAttendu >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
+                >
+                  {soldeNetAttendu >= 0 ? '+' : ''}
+                  {formatEur(soldeNetAttendu)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Encaissements attendus (clients) */}
+            {encAttendus && (
+              <div className="bg-card border border-card-border rounded-xl p-5 space-y-4">
+                <div className="flex items-center gap-2">
+                  <ArrowDownCircle size={18} className="text-emerald-400" />
+                  <h4 className="text-base font-semibold text-text-primary">
+                    Encaissements attendus
+                  </h4>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-3">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <AlertTriangle size={13} className="text-red-400" />
+                      <span className="text-xs text-red-400 font-medium">
+                        En retard
+                      </span>
+                    </div>
+                    <p className="text-lg font-bold text-red-400">
+                      {formatEur(encAttendus.overdueTotal)}
+                    </p>
+                    <p className="text-xs text-text-secondary">
+                      {encAttendus.overdueCount} facture
+                      {encAttendus.overdueCount > 1 ? 's' : ''}
+                    </p>
+                  </div>
+                  <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Clock size={13} className="text-emerald-400" />
+                      <span className="text-xs text-emerald-400 font-medium">
+                        À venir J+30
+                      </span>
+                    </div>
+                    <p className="text-lg font-bold text-emerald-400">
+                      {formatEur(encAttendus.upcomingTotal)}
+                    </p>
+                    <p className="text-xs text-text-secondary">
+                      {encAttendus.upcomingCount} facture
+                      {encAttendus.upcomingCount > 1 ? 's' : ''}
+                    </p>
+                  </div>
+                </div>
+
+                {encAttendus.top5.length > 0 && (
+                  <div>
+                    <p className="text-xs text-text-secondary mb-2 font-medium">
+                      Top 5 montants
+                    </p>
+                    <div className="space-y-1.5">
+                      {encAttendus.top5.map((inv, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center justify-between text-xs py-1.5 px-2 rounded bg-white/[0.02]"
+                        >
+                          <span className="text-text-primary truncate max-w-[160px]">
+                            {inv.customer_name || 'Client inconnu'}
+                          </span>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className="text-text-secondary">
+                              {inv.deadline
+                                ? formatDeadline(inv.deadline)
+                                : '—'}
+                            </span>
+                            <span className="font-bold text-emerald-400">
+                              {formatEur(inv.amount_incl_tax || 0)}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Décaissements attendus (fournisseurs) */}
+            {decAttendus && (
+              <div className="bg-card border border-card-border rounded-xl p-5 space-y-4">
+                <div className="flex items-center gap-2">
+                  <ArrowUpCircle size={18} className="text-red-400" />
+                  <h4 className="text-base font-semibold text-text-primary">
+                    Décaissements attendus
+                  </h4>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-3">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <AlertTriangle size={13} className="text-red-400" />
+                      <span className="text-xs text-red-400 font-medium">
+                        En retard
+                      </span>
+                    </div>
+                    <p className="text-lg font-bold text-red-400">
+                      {formatEur(decAttendus.overdueTotal)}
+                    </p>
+                    <p className="text-xs text-text-secondary">
+                      {decAttendus.overdueCount} facture
+                      {decAttendus.overdueCount > 1 ? 's' : ''}
+                    </p>
+                  </div>
+                  <div className="bg-orange-500/5 border border-orange-500/20 rounded-lg p-3">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Clock size={13} className="text-orange-400" />
+                      <span className="text-xs text-orange-400 font-medium">
+                        À venir J+30
+                      </span>
+                    </div>
+                    <p className="text-lg font-bold text-orange-400">
+                      {formatEur(decAttendus.upcomingTotal)}
+                    </p>
+                    <p className="text-xs text-text-secondary">
+                      {decAttendus.upcomingCount} facture
+                      {decAttendus.upcomingCount > 1 ? 's' : ''}
+                    </p>
+                  </div>
+                </div>
+
+                {decAttendus.top5.length > 0 && (
+                  <div>
+                    <p className="text-xs text-text-secondary mb-2 font-medium">
+                      Top 5 montants
+                    </p>
+                    <div className="space-y-1.5">
+                      {decAttendus.top5.map((inv, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center justify-between text-xs py-1.5 px-2 rounded bg-white/[0.02]"
+                        >
+                          <span className="text-text-primary truncate max-w-[160px]">
+                            {inv.supplier_name || 'Fournisseur inconnu'}
+                          </span>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className="text-text-secondary">
+                              {inv.deadline
+                                ? formatDeadline(inv.deadline)
+                                : '—'}
+                            </span>
+                            <span className="font-bold text-red-400">
+                              {formatEur(inv.amount_incl_tax || 0)}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
