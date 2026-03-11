@@ -5,11 +5,14 @@ import { supabase } from '@/lib/supabase';
 import { useSociete } from '@/lib/societe-context';
 import { formatEur } from '@/lib/utils';
 import { Loading, EmptyState } from '@/components/loading';
-import { TrendingUp, TrendingDown, Wallet } from 'lucide-react';
 import {
-  BarChart,
+  TrendingUp,
+  TrendingDown,
+  Wallet,
+  Landmark,
+} from 'lucide-react';
+import {
   Bar,
-  LineChart,
   Line,
   XAxis,
   YAxis,
@@ -18,7 +21,18 @@ import {
   ResponsiveContainer,
   ComposedChart,
   Legend,
+  AreaChart,
+  Area,
 } from 'recharts';
+
+/* ── Types ── */
+
+interface RawTx {
+  date: string;
+  amount: number;
+  bank_account_id: string | null;
+  bank_account_name: string | null;
+}
 
 interface WeekData {
   label: string;
@@ -29,7 +43,20 @@ interface WeekData {
   solde: number;
 }
 
-/** Returns the Monday (start of ISO week) for a given date */
+interface AccountSolde {
+  id: string;
+  name: string;
+  solde: number;
+  pct: number;
+}
+
+interface EvoWeek {
+  label: string;
+  solde: number;
+}
+
+/* ── Helpers ── */
+
 function getMonday(d: Date): Date {
   const date = new Date(d);
   const day = date.getDay();
@@ -46,31 +73,33 @@ function formatWeekLabel(d: Date): string {
 }
 
 function formatFullDate(d: Date): string {
-  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return d.toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
 }
+
+/* ── Component ── */
 
 export default function TresoreriePage() {
   const { selectedId } = useSociete();
-  const [transactions, setTransactions] = useState<{ date: string; amount: number }[]>([]);
-  const [tresorerieActuelle, setTresorerieActuelle] = useState<number | null>(null);
+  const [allTransactions, setAllTransactions] = useState<RawTx[]>([]);
+  const [tresorerieActuelle, setTresorerieActuelle] = useState<number | null>(
+    null
+  );
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     if (!selectedId) return;
     setLoading(true);
 
-    // Fetch last ~100 days of transactions and current treasury
+    // Fetch ALL transactions (paginated) + current treasury
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - 100);
     const dateFromStr = dateFrom.toISOString().split('T')[0];
 
-    const [txRes, kpiRes] = await Promise.all([
-      supabase
-        .from('pl_bank_transactions')
-        .select('date, amount')
-        .eq('societe_id', selectedId)
-        .gte('date', dateFromStr)
-        .order('date', { ascending: true }),
+    const [kpiRes] = await Promise.all([
       supabase
         .from('kpi_snapshots')
         .select('tresorerie')
@@ -79,10 +108,29 @@ export default function TresoreriePage() {
         .limit(1),
     ]);
 
-    if (txRes.data) setTransactions(txRes.data);
     if (kpiRes.data && kpiRes.data.length > 0) {
       setTresorerieActuelle(kpiRes.data[0].tresorerie);
+    } else {
+      setTresorerieActuelle(null);
     }
+
+    // Paginated fetch of ALL transactions for solde par compte
+    let allTxns: RawTx[] = [];
+    let offset = 0;
+    while (true) {
+      const { data: batch } = await supabase
+        .from('pl_bank_transactions')
+        .select('date, amount, bank_account_id, bank_account_name')
+        .eq('societe_id', selectedId)
+        .order('date', { ascending: true })
+        .range(offset, offset + 999);
+      if (!batch || batch.length === 0) break;
+      allTxns = allTxns.concat(batch);
+      offset += batch.length;
+      if (batch.length < 1000) break;
+    }
+
+    setAllTransactions(allTxns);
     setLoading(false);
   }, [selectedId]);
 
@@ -90,10 +138,52 @@ export default function TresoreriePage() {
     fetchData();
   }, [fetchData]);
 
-  const weeklyData: WeekData[] = useMemo(() => {
-    if (transactions.length === 0) return [];
+  // Filter last 100 days for the 13-week view
+  const recentTransactions = useMemo(() => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 100);
+    const cutoffStr = cutoff.toISOString().split('T')[0];
+    return allTransactions.filter((tx) => tx.date >= cutoffStr);
+  }, [allTransactions]);
 
-    // Build 13 weeks ending with the current week
+  /* ── 1. Solde par compte bancaire ── */
+  const accountSoldes: AccountSolde[] = useMemo(() => {
+    if (allTransactions.length === 0) return [];
+    const byAccount = new Map<string, { name: string; sum: number }>();
+    allTransactions.forEach((tx) => {
+      const id = tx.bank_account_id || 'unknown';
+      const name = tx.bank_account_name || `Compte ${id}`;
+      const existing = byAccount.get(id);
+      if (existing) {
+        existing.sum += tx.amount;
+      } else {
+        byAccount.set(id, { name, sum: tx.amount });
+      }
+    });
+
+    const entries = Array.from(byAccount.entries()).map(([id, v]) => ({
+      id,
+      name: v.name,
+      solde: Math.round(v.sum * 100) / 100,
+      pct: 0,
+    }));
+
+    const total = entries.reduce((s, e) => s + Math.abs(e.solde), 0);
+    entries.forEach((e) => {
+      e.pct = total > 0 ? Math.round((Math.abs(e.solde) / total) * 1000) / 10 : 0;
+    });
+
+    // Sort by solde descending
+    entries.sort((a, b) => b.solde - a.solde);
+    return entries;
+  }, [allTransactions]);
+
+  const totalComptes = accountSoldes.reduce((s, a) => s + a.solde, 0);
+
+  /* ── 2. 13 semaines glissantes ── */
+  const weeklyData: WeekData[] = useMemo(() => {
+    if (recentTransactions.length === 0) return [];
+
     const today = new Date();
     const currentMonday = getMonday(today);
     const weeks: { start: Date; end: Date }[] = [];
@@ -106,25 +196,20 @@ export default function TresoreriePage() {
       weeks.push({ start, end });
     }
 
-    // Group transactions by week
     const weekTotals = weeks.map((w) => {
       const startStr = w.start.toISOString().split('T')[0];
       const endStr = w.end.toISOString().split('T')[0];
-
       let enc = 0;
       let dec = 0;
-      transactions.forEach((tx) => {
+      recentTransactions.forEach((tx) => {
         if (tx.date >= startStr && tx.date <= endStr) {
           if (tx.amount > 0) enc += tx.amount;
           else dec += Math.abs(tx.amount);
         }
       });
-
       return { enc, dec };
     });
 
-    // Calculate cumulative balance
-    // Start from current treasury and work backwards to find the starting balance
     const totalNet = weekTotals.reduce((sum, w) => sum + w.enc - w.dec, 0);
     const startingSolde = (tresorerieActuelle ?? 0) - totalNet;
 
@@ -140,13 +225,63 @@ export default function TresoreriePage() {
         solde: Math.round(solde * 100) / 100,
       };
     });
-  }, [transactions, tresorerieActuelle]);
+  }, [recentTransactions, tresorerieActuelle]);
 
-  // KPI summary
+  /* ── 3. Courbe d'évolution trésorerie 90j par semaine ── */
+  const evoData: EvoWeek[] = useMemo(() => {
+    if (allTransactions.length === 0 || tresorerieActuelle === null) return [];
+
+    const today = new Date();
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 90);
+    const cutoffStr = cutoff.toISOString().split('T')[0];
+
+    const txns90 = allTransactions.filter((tx) => tx.date >= cutoffStr);
+
+    // Build ~13 weeks
+    const currentMonday = getMonday(today);
+    const weeks: { start: Date; end: Date }[] = [];
+    for (let i = 12; i >= 0; i--) {
+      const start = new Date(currentMonday);
+      start.setDate(start.getDate() - i * 7);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 6);
+      weeks.push({ start, end });
+    }
+
+    const weekNets = weeks.map((w) => {
+      const startStr = w.start.toISOString().split('T')[0];
+      const endStr = w.end.toISOString().split('T')[0];
+      let net = 0;
+      txns90.forEach((tx) => {
+        if (tx.date >= startStr && tx.date <= endStr) {
+          net += tx.amount;
+        }
+      });
+      return net;
+    });
+
+    const totalNet90 = weekNets.reduce((s, n) => s + n, 0);
+    const startSolde = tresorerieActuelle - totalNet90;
+
+    let solde = startSolde;
+    return weeks.map((w, i) => {
+      solde += weekNets[i];
+      return {
+        label: `S${formatWeekLabel(w.start)}`,
+        solde: Math.round(solde * 100) / 100,
+      };
+    });
+  }, [allTransactions, tresorerieActuelle]);
+
+  /* ── KPI summary ── */
   const totalEnc = weeklyData.reduce((s, w) => s + w.encaissements, 0);
   const totalDec = weeklyData.reduce((s, w) => s + w.decaissements, 0);
 
   if (loading) return <Loading />;
+
+  /* ── Colors for accounts ── */
+  const accountColors = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899'];
 
   return (
     <div className="space-y-6">
@@ -161,8 +296,12 @@ export default function TresoreriePage() {
             <TrendingUp size={20} className="text-emerald-400" />
           </div>
           <div>
-            <p className="text-sm text-text-secondary">Encaissements (13 sem.)</p>
-            <p className="text-xl font-bold text-emerald-400">{formatEur(totalEnc)}</p>
+            <p className="text-sm text-text-secondary">
+              Encaissements (13 sem.)
+            </p>
+            <p className="text-xl font-bold text-emerald-400">
+              {formatEur(totalEnc)}
+            </p>
           </div>
         </div>
         <div className="bg-card border border-card-border rounded-xl p-5 flex items-center gap-4">
@@ -170,8 +309,12 @@ export default function TresoreriePage() {
             <TrendingDown size={20} className="text-red-400" />
           </div>
           <div>
-            <p className="text-sm text-text-secondary">Décaissements (13 sem.)</p>
-            <p className="text-xl font-bold text-red-400">{formatEur(totalDec)}</p>
+            <p className="text-sm text-text-secondary">
+              Décaissements (13 sem.)
+            </p>
+            <p className="text-xl font-bold text-red-400">
+              {formatEur(totalDec)}
+            </p>
           </div>
         </div>
         <div className="bg-card border border-card-border rounded-xl p-5 flex items-center gap-4">
@@ -180,12 +323,131 @@ export default function TresoreriePage() {
           </div>
           <div>
             <p className="text-sm text-text-secondary">Solde actuel</p>
-            <p className={`text-xl font-bold ${(tresorerieActuelle ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            <p
+              className={`text-xl font-bold ${(tresorerieActuelle ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
+            >
               {formatEur(tresorerieActuelle ?? 0)}
             </p>
           </div>
         </div>
       </div>
+
+      {/* ── Solde par compte bancaire ── */}
+      {accountSoldes.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+            <Landmark size={18} className="text-text-secondary" />
+            Détail par compte bancaire
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {accountSoldes.map((account, i) => (
+              <div
+                key={account.id}
+                className="bg-card border border-card-border rounded-xl p-5"
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div
+                    className="w-3 h-3 rounded-full shrink-0"
+                    style={{
+                      backgroundColor:
+                        accountColors[i % accountColors.length],
+                    }}
+                  />
+                  <p className="text-sm text-text-secondary truncate">
+                    {account.name}
+                  </p>
+                </div>
+                <p
+                  className={`text-xl font-bold ${account.solde >= 0 ? 'text-text-primary' : 'text-red-400'}`}
+                >
+                  {formatEur(account.solde)}
+                </p>
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${Math.min(account.pct, 100)}%`,
+                        backgroundColor:
+                          accountColors[i % accountColors.length],
+                      }}
+                    />
+                  </div>
+                  <span className="text-xs text-text-secondary">
+                    {account.pct}%
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Total check */}
+          <p className="text-xs text-text-secondary text-right">
+            Somme des comptes : {formatEur(totalComptes)}
+          </p>
+        </div>
+      )}
+
+      {/* ── Courbe d'évolution trésorerie 90j ── */}
+      {evoData.length > 0 && (
+        <div className="bg-card border border-card-border rounded-xl p-6">
+          <h3 className="text-lg font-semibold text-text-primary mb-4">
+            Évolution de la trésorerie — 90 jours
+          </h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={evoData}>
+                <defs>
+                  <linearGradient
+                    id="soldeGradient"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#2d3548" />
+                <XAxis
+                  dataKey="label"
+                  stroke="#64748b"
+                  fontSize={11}
+                  tickLine={false}
+                />
+                <YAxis
+                  stroke="#64748b"
+                  fontSize={11}
+                  tickLine={false}
+                  tickFormatter={(v) =>
+                    new Intl.NumberFormat('fr-FR', {
+                      notation: 'compact',
+                      compactDisplay: 'short',
+                    }).format(v)
+                  }
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#1e2330',
+                    border: '1px solid #2d3548',
+                    borderRadius: '8px',
+                    color: '#e2e8f0',
+                  }}
+                  formatter={(value: number) => [formatEur(value), 'Trésorerie']}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="solde"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  fill="url(#soldeGradient)"
+                  dot={{ fill: '#10b981', r: 3 }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {weeklyData.length === 0 ? (
         <EmptyState message="Aucune transaction bancaire" />
@@ -240,14 +502,20 @@ export default function TresoreriePage() {
                     }}
                     formatter={(value: number, name: string) => [
                       formatEur(value),
-                      name === 'encaissements' ? 'Encaissements' :
-                      name === 'decaissements' ? 'Décaissements' : 'Solde cumulé',
+                      name === 'encaissements'
+                        ? 'Encaissements'
+                        : name === 'decaissements'
+                          ? 'Décaissements'
+                          : 'Solde cumulé',
                     ]}
                   />
                   <Legend
                     formatter={(value) =>
-                      value === 'encaissements' ? 'Encaissements' :
-                      value === 'decaissements' ? 'Décaissements' : 'Solde cumulé'
+                      value === 'encaissements'
+                        ? 'Encaissements'
+                        : value === 'decaissements'
+                          ? 'Décaissements'
+                          : 'Solde cumulé'
                     }
                   />
                   <Bar
@@ -283,31 +551,53 @@ export default function TresoreriePage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-card-border">
-                    <th className="text-left text-xs font-medium text-text-secondary px-6 py-4">Semaine</th>
-                    <th className="text-right text-xs font-medium text-text-secondary px-6 py-4">Encaissements</th>
-                    <th className="text-right text-xs font-medium text-text-secondary px-6 py-4">Décaissements</th>
-                    <th className="text-right text-xs font-medium text-text-secondary px-6 py-4">Net</th>
-                    <th className="text-right text-xs font-medium text-text-secondary px-6 py-4">Solde cumulé</th>
+                    <th className="text-left text-xs font-medium text-text-secondary px-6 py-4">
+                      Semaine
+                    </th>
+                    <th className="text-right text-xs font-medium text-text-secondary px-6 py-4">
+                      Encaissements
+                    </th>
+                    <th className="text-right text-xs font-medium text-text-secondary px-6 py-4">
+                      Décaissements
+                    </th>
+                    <th className="text-right text-xs font-medium text-text-secondary px-6 py-4">
+                      Net
+                    </th>
+                    <th className="text-right text-xs font-medium text-text-secondary px-6 py-4">
+                      Solde cumulé
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {weeklyData.map((row, i) => {
                     const net = row.encaissements - row.decaissements;
                     return (
-                      <tr key={i} className="border-b border-card-border/50 hover:bg-white/[0.02]">
+                      <tr
+                        key={i}
+                        className="border-b border-card-border/50 hover:bg-white/[0.02]"
+                      >
                         <td className="px-6 py-4 text-sm text-text-primary">
                           {row.start} → {row.end}
                         </td>
                         <td className="px-6 py-4 text-sm text-emerald-400 text-right">
-                          {row.encaissements > 0 ? `+${formatEur(row.encaissements)}` : '—'}
+                          {row.encaissements > 0
+                            ? `+${formatEur(row.encaissements)}`
+                            : '—'}
                         </td>
                         <td className="px-6 py-4 text-sm text-red-400 text-right">
-                          {row.decaissements > 0 ? `-${formatEur(row.decaissements)}` : '—'}
+                          {row.decaissements > 0
+                            ? `-${formatEur(row.decaissements)}`
+                            : '—'}
                         </td>
-                        <td className={`px-6 py-4 text-sm text-right font-medium ${net >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {net >= 0 ? '+' : ''}{formatEur(net)}
+                        <td
+                          className={`px-6 py-4 text-sm text-right font-medium ${net >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
+                        >
+                          {net >= 0 ? '+' : ''}
+                          {formatEur(net)}
                         </td>
-                        <td className={`px-6 py-4 text-sm text-right font-bold ${row.solde >= 0 ? 'text-text-primary' : 'text-red-400'}`}>
+                        <td
+                          className={`px-6 py-4 text-sm text-right font-bold ${row.solde >= 0 ? 'text-text-primary' : 'text-red-400'}`}
+                        >
                           {formatEur(row.solde)}
                         </td>
                       </tr>
