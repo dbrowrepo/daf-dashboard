@@ -29,7 +29,7 @@ export interface Action {
   societe_id: string;
   titre: string;
   description: string;
-  statut: 'à faire' | 'en cours' | 'fait';
+  statut: 'todo' | 'in_progress' | 'done';
   priorite: 'haute' | 'moyenne' | 'basse';
   assignee: string;
   echeance: string;
