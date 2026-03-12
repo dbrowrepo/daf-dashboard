@@ -20,8 +20,9 @@ export interface Alerte {
   societe_id: string;
   titre: string;
   description: string;
-  niveau: 'haute' | 'moyenne' | 'info';
+  niveau: 'haute' | 'moyenne' | 'basse';
   created_at: string;
+  resolved_at: string | null;
 }
 
 export interface Action {
@@ -52,8 +53,11 @@ export interface PlCustomerInvoice {
   date: string;
   deadline: string;
   customer_name: string;
+  amount_excl_tax: number;
   amount_incl_tax: number;
   status: string;
+  currency: string;
+  synced_at: string;
 }
 
 export interface PlSupplierInvoice {
@@ -63,8 +67,11 @@ export interface PlSupplierInvoice {
   date: string;
   deadline: string;
   supplier_name: string;
+  amount_excl_tax: number;
   amount_incl_tax: number;
   status: string | null;
+  currency: string;
+  synced_at: string;
 }
 
 export interface PlBankTransaction {
@@ -73,5 +80,8 @@ export interface PlBankTransaction {
   date: string;
   label: string;
   amount: number;
+  currency: string;
+  bank_account_id: string;
   bank_account_name: string;
+  synced_at: string;
 }

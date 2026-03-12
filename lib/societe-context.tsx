@@ -18,10 +18,17 @@ const SocieteContext = createContext<SocieteContextType>({
   loading: true,
 });
 
+const STORAGE_KEY = 'daf-selected-societe';
+
 export function SocieteProvider({ children }: { children: ReactNode }) {
   const [societes, setSocietes] = useState<Societe[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedIdState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  function setSelectedId(id: string) {
+    setSelectedIdState(id);
+    try { localStorage.setItem(STORAGE_KEY, id); } catch {}
+  }
 
   useEffect(() => {
     async function fetchSocietes() {
@@ -31,7 +38,9 @@ export function SocieteProvider({ children }: { children: ReactNode }) {
         .order('nom', { ascending: true });
       if (data && data.length > 0) {
         setSocietes(data);
-        setSelectedId(data[0].id);
+        const saved = (() => { try { return localStorage.getItem(STORAGE_KEY); } catch { return null; } })();
+        const valid = saved && data.some((s) => s.id === saved);
+        setSelectedIdState(valid ? saved : data[0].id);
       }
       setLoading(false);
     }

@@ -8,7 +8,7 @@ import { formatEur } from '@/lib/utils';
 import { KpiCard } from '@/components/kpi-card';
 import { AlerteBadge } from '@/components/alerte-badge';
 import { Loading, EmptyState } from '@/components/loading';
-import { Wallet, Clock, TrendingUp, BarChart3 } from 'lucide-react';
+import { Wallet, Clock, TrendingUp, BarChart3, Flame } from 'lucide-react';
 
 export default function DashboardPage() {
   const { selectedId } = useSociete();
@@ -33,6 +33,7 @@ export default function DashboardPage() {
           .from('alertes')
           .select('*')
           .eq('societe_id', selectedId)
+          .is('resolved_at', null)
           .order('created_at', { ascending: false }),
         supabase
           .from('actions')
@@ -92,7 +93,7 @@ export default function DashboardPage() {
       <h2 className="text-2xl font-bold text-text-primary">Tableau de bord</h2>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <KpiCard
           title="Trésorerie"
           value={snapshot ? formatEur(snapshot.tresorerie) : '—'}
@@ -129,6 +130,12 @@ export default function DashboardPage() {
               ? variation(snapshot.resultat_mtd, prevSnapshot.resultat_mtd)
               : null
           }
+        />
+        <KpiCard
+          title="Burn mensuel"
+          value={snapshot ? formatEur(snapshot.burn_mensuel) : '—'}
+          icon={Flame}
+          variant="negative"
         />
       </div>
 
