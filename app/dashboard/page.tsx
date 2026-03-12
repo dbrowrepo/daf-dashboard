@@ -33,7 +33,6 @@ export default function DashboardPage() {
           .from('alertes')
           .select('*')
           .eq('societe_id', selectedId)
-          .is('resolved_at', null)
           .order('created_at', { ascending: false }),
         supabase
           .from('actions')

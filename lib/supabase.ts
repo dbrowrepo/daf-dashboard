@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import type {
   Societe,
   KpiSnapshot,
+  KpiMonthly,
   PlCustomerInvoice,
   PlSupplierInvoice,
   PlBankTransaction,
@@ -93,13 +94,25 @@ export async function getTransactions(
   return all;
 }
 
+/** KPI mensuels depuis la vue kpi_monthly */
+export async function getKpiMonthly(
+  societeId: string
+): Promise<KpiMonthly[]> {
+  const { data, error } = await supabase
+    .from('kpi_monthly')
+    .select('*')
+    .eq('societe_id', societeId)
+    .order('mois', { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
 /** Alertes non résolues */
 export async function getAlertes(societeId: string): Promise<Alerte[]> {
   const { data } = await supabase
     .from('alertes')
     .select('*')
     .eq('societe_id', societeId)
-    .is('resolved_at', null)
     .order('created_at', { ascending: false });
   return data ?? [];
 }

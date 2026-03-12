@@ -22,7 +22,6 @@ export interface Alerte {
   description: string;
   niveau: 'haute' | 'moyenne' | 'basse';
   created_at: string;
-  resolved_at: string | null;
 }
 
 export interface Action {
@@ -44,6 +43,18 @@ export interface Tresorerie13Semaines {
   encaissements_prevus: number;
   decaissements_prevus: number;
   solde_prev: number;
+}
+
+export interface KpiMonthly {
+  societe_id: string;
+  mois: string;
+  ca_mtd: number;
+  charges_mtd: number;
+  resultat_mtd: number;
+  tresorerie: number;
+  burn_mensuel: number;
+  runway_mois: number;
+  date_snapshot: string;
 }
 
 export interface PlCustomerInvoice {
